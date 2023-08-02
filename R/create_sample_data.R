@@ -1,8 +1,7 @@
-#' Title
+#' Create Sample Dataframe
 #'
-#' @param treatment
-#' @param light_isotope
-#' @param heavy_isotope
+#' @param treatment A vector with names of biological treatments (e.g. drought)
+#' @param isotope A vector of isotopes either explicit (c("12C", "13C")) or implicit ("C")
 #' @param replicate
 #' @param timepoint
 #'
@@ -11,27 +10,32 @@
 #'
 #' @examples
 create_sample_data <- function(treatment = c("TRT1", "TRT2"),
-                               light_isotope = c("12C"),
-                               heavy_isotope = c("13C"),
+                               isotope = "C",
                                replicate = c("A", "B", "C"),
                                timepoint = c("early")) {
-  # check if isotopes are allowed
-  allowed_light <- c("12C", "14N", "16O", "unlabeled")
-  allowed_heavy <- c("13C", "15N", "18O")
 
-  if (length(setdiff(light_isotope, allowed_light)) > 0) {
-    stop("light_isotope is not an allowed value")
-  } else if (length(setdiff(heavy_isotope, allowed_heavy)) > 0) {
-    stop("heavy_isotope is not an allowed value")
+  # populate isotopes
+  isotopes = vector()
+  for (i in isotope) {
+    if (i %in% c("C", "12C", "13C")) {
+      isotopes = c(isotopes, "unlabeled", "13C")
+    } else if (i %in% c("N", "14N", "15N")) {
+      isotopes = c(isotopes, "unlabeled", "15N")
+    } else if (i %in% c("O", "16O", "18O")) {
+      isotopes = c(isotopes, "unlabeled", "18O")
+    } else {
+      stop(paste0("Unknown isotope \"", i, "\" provided"))
+    }
   }
 
-  isotopes <- c(light_isotope, heavy_isotope)
+  isotopes = unique(isotopes)
 
   tidyr::expand_grid(treatment, isotopes, timepoint, replicate) %>%
     dplyr::mutate(tube = dplyr::row_number()) %>%
     dplyr::rowwise() %>%
     dplyr::mutate(
-      material_g = rnorm(1, mean = 5, sd = 0.5),
-      dna_ug = rnorm(1, mean = 20, sd = 5)
+      material_g = abs(rnorm(1, mean = 5, sd = 0.5)),
+      dna_ug = abs(rnorm(1, mean = 20, sd = 5)),
+      qPCR_copies_ul = abs(rnorm(1, mean = dna_ug*5000000, sd = 10000000))
     )
 }
