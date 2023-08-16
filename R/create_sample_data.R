@@ -10,9 +10,13 @@
 #'
 #' @examples
 create_sample_data <- function(treatment = c("TRT1", "TRT2"),
-                               isotope = "C",
+                               isotope = "13C",
                                replicate = c("A", "B", "C"),
-                               timepoint = c("early")) {
+                               timepoint = c("early"),
+                               with_seed = NULL) {
+
+  # use seed if provided
+  if(!is.null(with_seed)){set.seed(with_seed)}
 
   # populate isotopes
   isotopes = vector()

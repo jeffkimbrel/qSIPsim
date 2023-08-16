@@ -1,6 +1,6 @@
 Package: qSIPsim
 Title: qSIP Data Simulation
-Version: 0.0.1
+Version: 0.0.1.9001
 Authors@R: 
     person("Jeff", "Kimbrel", , "kimbrel1@llnl.gov", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0001-7213-9392"))
