@@ -22,19 +22,20 @@ create_sample_data <- function(treatment = c("TRT1", "TRT2"),
   isotopes = vector()
   for (i in isotope) {
     if (i %in% c("C", "12C", "13C")) {
-      isotopes = c(isotopes, "unlabeled", "13C")
+      isotopes = c(isotopes, "13C")
     } else if (i %in% c("N", "14N", "15N")) {
-      isotopes = c(isotopes, "unlabeled", "15N")
+      isotopes = c(isotopes, "15N")
     } else if (i %in% c("O", "16O", "18O")) {
-      isotopes = c(isotopes, "unlabeled", "18O")
+      isotopes = c(isotopes, "18O")
     } else {
       stop(paste0("Unknown isotope \"", i, "\" provided"))
     }
   }
 
-  isotopes = unique(isotopes)
+  isotope = unique(isotopes)
+  isotopolog_label = c("natural abundance", "isotopically labeled")
 
-  tidyr::expand_grid(treatment, isotopes, timepoint, replicate) %>%
+  tidyr::expand_grid(treatment, isotope, isotopolog_label, timepoint, replicate) %>%
     dplyr::mutate(tube = dplyr::row_number()) %>%
     dplyr::rowwise() %>%
     dplyr::mutate(
