@@ -2,19 +2,23 @@
 % Please edit documentation in R/create_sample_data.R
 \name{create_sample_data}
 \alias{create_sample_data}
-\title{Title}
+\title{Create Sample Dataframe}
 \usage{
 create_sample_data(
   treatment = c("TRT1", "TRT2"),
-  light_isotope = c("12C"),
-  heavy_isotope = c("13C"),
+  isotope = "13C",
   replicate = c("A", "B", "C"),
-  timepoint = c("early")
+  timepoint = c("early"),
+  with_seed = NULL
 )
 }
 \arguments{
+\item{treatment}{A vector with names of biological treatments (e.g. drought)}
+
+\item{isotope}{A vector of isotopes either explicit (c("12C", "13C")) or implicit ("C")}
+
 \item{timepoint}{}
 }
 \description{
-Title
+Create Sample Dataframe
 }

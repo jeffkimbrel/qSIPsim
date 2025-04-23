@@ -1,0 +1,282 @@
+---
+title: "Simulating qSIP Data"
+author: "Jeff Kimbrel"
+date: "`r Sys.Date()`"
+format: 
+  html:
+    fig-width: 8
+    fig-height: 4
+    code-fold: false
+    toc: true
+    theme: litera
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+#| include: false
+library(tidyverse)
+library(gt)
+library(jakR)
+```
+
+# Background
+
+The idea is to make some code to generate qSIP datasets. These datasets will be useful for the refactor, and also to make some unit test datasets. I will make several layers of data, starting with a samples, then taxa, then fractions.
+
+# Sample Data
+
+There should be an option for number of replicates, number of heavy isotopes (and always make 1 light isotope), and number of time points.
+
+```{r}
+#| label: table_samples
+#| 
+treatment <- c("TRT1", "TRT2")
+replicate <- c("A", "B", "C")
+light_isotope <- c("Unlabeled")
+heavy_isotope <- c("13C", "15N")
+isotope <- c(light_isotope, heavy_isotope)
+timepoint <- c("early")
+density_breaks <- 0.01
+
+# https://stackoverflow.com/questions/64370044/sample-from-a-skewed-distribution-in-r
+# skewed_distribution = sample(1:10, size = 100, replace = TRUE, prob = 10:1)*0.01
+# hist(skewed_distribution)
+
+# setting on one that looks ok....
+skewed_distribution <- c(
+  0.1, 0.04, 0.07, 0.02, 0.02, 0.01, 0.04, 0.01, 0.02, 0.05,
+  0.04, 0.01, 0.08, 0.08, 0.02, 0.06, 0.05, 0.07, 0.03, 0.05, 0.03,
+  0.07, 0.03, 0.05, 0.08, 0.02, 0.01, 0.07, 0.02, 0.03, 0.08, 0.06,
+  0.07, 0.01, 0.03, 0.08, 0.01, 0.01, 0.09, 0.02, 0.04, 0.02, 0.04,
+  0.01, 0.02, 0.02, 0.03, 0.01, 0.05, 0.02, 0.03, 0.1, 0.02, 0.05,
+  0.06, 0.03, 0.05, 0.05, 0.04, 0.07, 0.01, 0.07, 0.06, 0.07, 0.08,
+  0.01, 0.07, 0.06, 0.03, 0.09, 0.02, 0.03, 0.04, 0.01, 0.04, 0.04,
+  0.03, 0.02, 0.07, 0.05, 0.01, 0.03, 0.01, 0.02, 0.01, 0.04, 0.01,
+  0.01, 0.01, 0.02, 0.01, 0.01, 0.01, 0.05, 0.01, 0.06, 0.04, 0.03,
+  0.03, 0.06
+)
+
+expand_grid(treatment, isotope, timepoint, replicate) %>%
+  mutate(tube = row_number()) %>%
+  rowwise() %>%
+  mutate(
+    material_g = rnorm(1, mean = 5, sd = 0.5),
+    dna_ug = rnorm(1, mean = 20, sd = 5)
+  ) %>%
+  gt::gt()
+```
+
+# Taxa Copies
+
+I think the initial calculation here should be related to copies in the sample, and then from that read count or some "sampling" could be derived. 
+
+There will be `n` number of taxa, with taxa1 always having the initial highest probability, down to the last taxa, and this will be a long-tailed distribution. 
+
+```{r}
+number_of_taxa <- 100
+count_min <- 5000
+count_max <- 50000
+
+tib <- tibble(
+  TAXA = factor(),
+  REP = factor(),
+  COUNT = integer(),
+  TREATMENT = factor(),
+  TIMEPOINT = factor(),
+  ISOTOPE = factor()
+)
+distribution <- sort(sample(stats::df(seq(0, 50, .05)^0.55, 1, 100), size = number_of_taxa), decreasing = T)
+distribution <- distribution[!is.na(distribution) & !is.infinite(distribution)]
+names(distribution) <- paste("taxa", 1:length(distribution), sep = "")
+
+for (trt in treatment) {
+  for (time in timepoint) {
+    for (r in replicate) {
+      for (i in isotope) {
+        taxa_count <- sample(x = names(distribution), size = floor(runif(1, count_min, count_max)), replace = TRUE, prob = distribution) %>%
+          as_tibble_col(column_name = "TAXA") %>%
+          mutate(REP = r) %>%
+          group_by(TAXA, REP) %>%
+          summarise(COUNT = n(), TREATMENT = trt, TIMEPOINT = time, ISOTOPE = i, .groups = "drop")
+  
+        tib <- bind_rows(tib, taxa_count)
+      }
+    }
+  }
+}
+```
+
+```{r}
+# tib %>%
+#   group_by(REP) %>%
+#   mutate(FREQ = COUNT / sum(COUNT)) %>%
+#   ggplot(aes(x = reorder(TAXA, FREQ), y = FREQ, fill = REP)) +
+#     jak_theme() +
+#     geom_point(pch = 21, alpha = 0.7, size = 2) +
+#     coord_flip() +
+#     scale_fill_manual(values = palette_jak$bay(3)) +
+#     theme(axis.text.y = element_blank(),
+#           axis.ticks.y = element_blank(),
+#           panel.grid.major.y = element_blank(),
+#           legend.position = "none")
+
+tib %>%
+  group_by(TREATMENT, TIMEPOINT, ISOTOPE, REP) %>%
+  summarize(COUNT = sum(COUNT), .groups = "drop") %>%
+  gt::gt()
+```
+
+OK, looks good. Really, it is the `distribution` object that is needed for consistency between all replicates and isotopes within a treatment. But next, the densities/fraction profiles will be different depending whether it is the light or heavy isotope. 
+
+The timepoint and treatments can have different taxa distributions. 
+
+# Isotope Data
+
+```{r}
+bimodalDistFunc <- function(n, peak_ratio, low_peak, high_peak, peak_sd) {
+  y0 <- rnorm(n, mean = low_peak, sd = peak_sd)
+  y1 <- rnorm(n, mean = high_peak, sd = peak_sd)
+
+  flag <- rbinom(n, size = 1, prob = peak_ratio)
+  y <- y0 * (1 - flag) + y1 * flag
+  return(y)
+}
+```
+
+```{r}
+taxa_count_sd <- 0.1
+density_variance <- 0.01
+
+df <- tibble()
+
+message(paste("Simulating counts for", length(unique(tib$TAXA)), "taxa..."))
+pb <- progress::progress_bar$new(total = length(unique(tib$TAXA)))
+
+for (taxa in unique(tib$TAXA)) {
+  pb$tick()
+  light_density_mean <- runif(1, 1.67, 1.70)
+
+  for (trt in treatment) {
+    for (time in timepoint) {
+
+      # for each heavy isotope, calculate its own heavy density peak, and store for later
+      heavy_density_mean <- light_density_mean + sample(skewed_distribution, size = 1)
+      heavy_df <- tibble()
+
+      for (heavy in heavy_isotope) {
+        heavy_df <- rbind(
+          heavy_df,
+          tibble(
+            "ISOTOPE" = heavy,
+            "PEAK" = light_density_mean + sample(skewed_distribution, size = 1)
+          )
+        )
+      }
+
+      # ratio between the heavy peak and the light peak
+      light_heavy_ratio <- runif(1, 0.1, 0.9)
+
+      for (r in replicate) {
+        
+        # get the count of this taxa in this sample
+        for (i in isotope) {
+          count <- tib %>%
+            filter(
+              TAXA == taxa,
+              REP == r,
+              TIMEPOINT == time,
+              TREATMENT == trt
+            ) %>%
+            pull(COUNT)
+          
+          if (length(count) > 0) { # needed because some taxa may be missing from some treatments, time points, etc...
+
+            # if a "light" isotope, run the light algorithm
+            if (i %in% light_isotope) { 
+              s <- rnorm(rnorm(1, mean = count, sd = count * taxa_count_sd),
+                         mean = light_density_mean,
+                         sd = density_variance
+              )
+            } else { # otherwise....
+              
+              # grab the unique peak for this isotope
+              heavy_peak <- heavy_df %>%
+                filter(ISOTOPE == i) %>%
+                pull(PEAK) 
+              
+              # calculate the bimodal distribution between the light and heavy peaks
+              s <- bimodalDistFunc(
+                n = rnorm(1, mean = count, sd = count * taxa_count_sd),
+                light_heavy_ratio,
+                light_density_mean,
+                heavy_peak,
+                density_variance
+              )
+            }
+
+            # s is a collection of densities for each taxa count, so next bin these counts into frequency bins based on the density breaks
+            df2 <- tibble("DENSITY" = s) %>%
+              mutate(BIN = cut(DENSITY, breaks = seq(1.6, 1.85, density_breaks))) %>%
+              group_by(BIN) %>%
+              count(name = "COUNT") %>%
+              separate(BIN, into = c("LOW", "HIGH"), sep = ",", remove = F) %>%
+              mutate(
+                LOW = as.numeric(str_replace(LOW, "\\(", "")),
+                HIGH = as.numeric(str_replace(HIGH, "\\]", ""))
+              ) %>%
+              mutate(DENSITY = mean(c(LOW, HIGH))) %>%
+              ungroup() %>%
+              mutate(FRACTION = paste("F", DENSITY, sep = "_")) %>%
+              mutate(FREQUENCY = COUNT / sum(COUNT)) %>%
+              select(FRACTION, DENSITY, COUNT, FREQUENCY) %>%
+              mutate(TAXA = taxa, REPLICATE = r, ISOTOPE = i, TREATMENT = trt, TIMEPOINT = time)
+            
+            # finally, add to the growing dataframe
+            df <- rbind(df, df2) %>%
+              dplyr::mutate(across(where(is.character), as_factor))
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+```{r}
+tib %>% arrange(desc(COUNT))
+
+df %>%
+  filter(TAXA %in% c("taxa44", "taxa55", "taxa66")) %>%
+  group_by(TREATMENT, ISOTOPE, TIMEPOINT, DENSITY, TAXA) %>%
+  summarise(MEAN_COUNT = mean(COUNT)) %>%
+  ggplot(aes(x = DENSITY, y = MEAN_COUNT)) +
+  theme_bw() +
+  geom_point(aes(color = ISOTOPE)) +
+  geom_line(aes(color = ISOTOPE), size = 2, alpha = 0.7) +
+  facet_grid(TREATMENT ~ TAXA) +
+  scale_color_manual(values = palette_jak(n = 3))
+
+
+df %>%
+  group_by(TREATMENT, ISOTOPE, TIMEPOINT, REPLICATE, DENSITY) %>%
+  summarise(COUNT = sum(COUNT)) %>%
+  mutate(FREQUENCY = COUNT / sum(COUNT)) %>%
+  ggplot(aes(x = DENSITY, y = FREQUENCY)) +
+  theme_bw() +
+  geom_line(aes(color = ISOTOPE, fill = REPLICATE), size = 2, alpha = 0.7) +
+  facet_grid(~TREATMENT) +
+  scale_color_manual(values = palette_jak(n = 3))
+
+# fraction counts
+df %>%
+  group_by(TREATMENT, ISOTOPE, TIMEPOINT, REPLICATE, TAXA) %>%
+  summarise(n = n()) %>%
+  ggplot(aes(x = TAXA, y = n, color = TREATMENT)) +
+    jak_theme() +
+    geom_point() +
+    facet_wrap(~TIMEPOINT+ISOTOPE, ncol = 1)
+
+
+```
+
